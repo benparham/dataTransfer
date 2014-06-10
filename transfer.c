@@ -61,9 +61,7 @@ static int min(int x, int y) {
 
 int tf_send(int socket_fd, const void *buf, size_t size_bytes) {
 
-	// Create and send header
-	// tf_header header = {MAGIC_CHECK, size_bytes};
-	// send(socket_fd, &header, sizeof(tf_header), 0);
+	// Send header
 	if (send_header(socket_fd, size_bytes)) {
 		return 1;
 	}
@@ -99,7 +97,7 @@ int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 	
 	printf("Preparing to send file\n");
 
-	// Create and send header
+	// Send header
 	if (send_header(socket_fd, size_bytes)) {
 		printf("Failed to send header\n");
 		return 1;
@@ -150,22 +148,31 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 
 	// Wait for header
 	tf_header header;
-	bytes_received = recv(socket_fd, &header, sizeof(tf_header), 0);
+	if ((bytes_received = recv(socket_fd, &header, sizeof(tf_header), 0)) == -1) {
+		*term = 1;
+		printf("recv error\n");
+		goto exit;
+	}
 
 	if (bytes_received == 0) {
 		*term = 1;
+		printf("bytes received was 0\n");
 		goto exit;
 	}
 
 	if (bytes_received != sizeof(tf_header) ||
 		header.magic != MAGIC_CHECK) {
+		printf("bytes received was wrong size or magic was wrong (bytes = %d)\n", bytes_received);
 		goto exit;
 	}
 
 	// Send confiration signal
 	if (send_signal(socket_fd, GOT_HEADER)) {
+		printf("failed to send confirmation signal\n");
 		goto exit;
 	}
+
+	printf("header says %d bytes\n", header.bytes);
 
 	// Allocate space for data
 	*buf = malloc(header.bytes);
@@ -180,6 +187,7 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 		bytes_received = recv(socket_fd, next, header.bytes - total_bytes_received, 0);
 		if (bytes_received == 0) {
 			*term = 1;
+			printf("bytes_received was 0 during data receive\n");
 			goto cleanup_buf;
 		}
 
@@ -188,11 +196,13 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 	}
 
 	if (total_bytes_received != header.bytes) {
+		printf("bytes received was != to total bytes stated by header\n");
 		goto cleanup_buf;
 	}
 
 	// Send confiration signal
 	if (send_signal(socket_fd, GOT_DATA)) {
+		printf("failed to send confiration signal (2)\n");
 		goto cleanup_buf;
 	}
 
