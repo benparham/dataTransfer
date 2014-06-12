@@ -105,7 +105,7 @@ int tf_send(int socket_fd, const void *buf, size_t size_bytes) {
 	while (bytes_to_send > 0) {
 		
 		// Send a maximum of MAX... bytes
-		int bytes_this_round = min(bytes_to_send, MAX_MESSAGE_SIZE);
+		int bytes_this_round = min(bytes_to_send, SEND_SIZE_BYTES);
 		send(socket_fd, next, bytes_this_round, 0);
 
 		// Decrement/Increment by number of bytes sent
@@ -134,13 +134,13 @@ int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 	}
 
 	int bytes_to_send = size_bytes;
-	char next[MAX_MESSAGE_SIZE];
+	char next[SEND_SIZE_BYTES];
 	while (bytes_to_send > 0) {
 
-		memset(next, 0, MAX_MESSAGE_SIZE);
+		memset(next, 0, SEND_SIZE_BYTES);
 
 		// Send a maximum of MAX... bytes
-		int bytes_this_round = min(bytes_to_send, MAX_MESSAGE_SIZE);
+		int bytes_this_round = min(bytes_to_send, SEND_SIZE_BYTES);
 		if (fread(next, bytes_this_round, 1, fp) != 1) {
 			return 1;
 		}
@@ -203,9 +203,29 @@ exit:
 	return 1;
 }
 
-int tf_recv_file(int socket_fd, FILE *fp, int offset) {
+int tf_recv_file(int socket_fd, FILE *fp, int *term) {
 
-	printf("Receive to file here\n");
+	assert(fp != NULL);
+
+	printf("Preparing to receive file\n");
+
+	tf_header header;
+
+	// Wait for header
+	if (wait_for_header(socket_fd, &header, term)) {
+		goto exit;
+	}
+	printf("Received header\n");
+
+	// Wait for data
+	int total_bytes_received = 0;
+	while (total_bytes_received < header.bytes) {
+
+		break;
+	}
 
 	return 0;
+
+exit:
+	return 1;
 }
