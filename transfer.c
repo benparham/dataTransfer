@@ -5,7 +5,6 @@
 
 #include <transfer.h>
 
-#define MAX_MESSAGE_SIZE	1024
 #define MAGIC_CHECK			123456789
 
 typedef enum TF_SIGNAL{
@@ -45,9 +44,43 @@ static int send_signal(int socket_fd, TF_SIGNAL sig) {
 	return 0;
 }
 
+static int wait_for_header(int socket_fd, tf_header *header, int *term) {
+	*term = 0;
+	int bytes_received;
+
+	// Receive header
+	if ((bytes_received = recv(socket_fd, header, sizeof(tf_header), 0)) == -1) {
+		*term = 1;
+		return 1;
+	}
+
+	// Verify correct size
+	if (bytes_received == 0) {
+		*term = 1;
+		return 1;
+	}
+
+	if (bytes_received != sizeof(tf_header) ||
+		header->magic != MAGIC_CHECK) {
+		return 1;
+	}
+
+	// Send confirmation signal
+	if (send_signal(socket_fd, GOT_HEADER)) {
+		return 1;
+	}
+
+	return 0;
+}
+
 static int send_header(int socket_fd, int size_bytes) {
 	tf_header header = {MAGIC_CHECK, size_bytes};
 	if (send(socket_fd, &header, sizeof(tf_header), 0) == -1) {
+		return 1;
+	}
+
+	// Wait for confirmation signal
+	if (wait_for_signal(socket_fd, GOT_HEADER)) {
 		return 1;
 	}
 
@@ -63,11 +96,6 @@ int tf_send(int socket_fd, const void *buf, size_t size_bytes) {
 
 	// Send header
 	if (send_header(socket_fd, size_bytes)) {
-		return 1;
-	}
-
-	// Wait for confirmation signal
-	if (wait_for_signal(socket_fd, GOT_HEADER)) {
 		return 1;
 	}
 
@@ -95,23 +123,13 @@ int tf_send(int socket_fd, const void *buf, size_t size_bytes) {
 
 int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 	
-	printf("Preparing to send file\n");
-
 	// Send header
 	if (send_header(socket_fd, size_bytes)) {
-		printf("Failed to send header\n");
-		return 1;
-	}
-
-	// Wait for confirmation signal
-	if (wait_for_signal(socket_fd, GOT_HEADER)) {
-		printf("Wait for signal failed\n");
 		return 1;
 	}
 
 	// Iteratively send all the data
 	if (fseek(fp, 0, SEEK_SET) == -1) {
-		printf("Failed to seek in file\n");
 		return 1;
 	}
 
@@ -124,12 +142,10 @@ int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 		// Send a maximum of MAX... bytes
 		int bytes_this_round = min(bytes_to_send, MAX_MESSAGE_SIZE);
 		if (fread(next, bytes_this_round, 1, fp) != 1) {
-			printf("Read error on file\n");
 			return 1;
 		}
 
 		if (send(socket_fd, next, bytes_this_round, 0) == -1) {
-			printf("Send error\n");
 			return 1;
 		}
 
@@ -142,37 +158,12 @@ int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 
 int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 
-	int bytes_received;
-
-	*term = 0;
+	tf_header header;
 
 	// Wait for header
-	tf_header header;
-	if ((bytes_received = recv(socket_fd, &header, sizeof(tf_header), 0)) == -1) {
-		*term = 1;
-		printf("recv error\n");
+	if (wait_for_header(socket_fd, &header, term)) {
 		goto exit;
 	}
-
-	if (bytes_received == 0) {
-		*term = 1;
-		printf("bytes received was 0\n");
-		goto exit;
-	}
-
-	if (bytes_received != sizeof(tf_header) ||
-		header.magic != MAGIC_CHECK) {
-		printf("bytes received was wrong size or magic was wrong (bytes = %d)\n", bytes_received);
-		goto exit;
-	}
-
-	// Send confiration signal
-	if (send_signal(socket_fd, GOT_HEADER)) {
-		printf("failed to send confirmation signal\n");
-		goto exit;
-	}
-
-	printf("header says %d bytes\n", header.bytes);
 
 	// Allocate space for data
 	*buf = malloc(header.bytes);
@@ -184,10 +175,9 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 	int total_bytes_received = 0;
 	char *next = *buf;
 	while(total_bytes_received < header.bytes) {
-		bytes_received = recv(socket_fd, next, header.bytes - total_bytes_received, 0);
+		int bytes_received = recv(socket_fd, next, header.bytes - total_bytes_received, 0);
 		if (bytes_received == 0) {
 			*term = 1;
-			printf("bytes_received was 0 during data receive\n");
 			goto cleanup_buf;
 		}
 
@@ -196,13 +186,11 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 	}
 
 	if (total_bytes_received != header.bytes) {
-		printf("bytes received was != to total bytes stated by header\n");
 		goto cleanup_buf;
 	}
 
 	// Send confiration signal
 	if (send_signal(socket_fd, GOT_DATA)) {
-		printf("failed to send confiration signal (2)\n");
 		goto cleanup_buf;
 	}
 
@@ -213,4 +201,11 @@ cleanup_buf:
 	*buf = NULL;
 exit:
 	return 1;
+}
+
+int tf_recv_file(int socket_fd, FILE *fp, int offset) {
+
+	printf("Receive to file here\n");
+
+	return 0;
 }
