@@ -218,8 +218,26 @@ int tf_recv_file(int socket_fd, FILE *fp, int *term) {
 	printf("Received header\n");
 
 	// Wait for data
+	char buf[RECV_BUF_SIZE_BYTES];
+
 	int total_bytes_received = 0;
 	while (total_bytes_received < header.bytes) {
+
+		memset(buf, 0, RECV_BUF_SIZE_BYTES);
+
+		int bytes_received = recv(socket_fd, next, RECV_BUF_SIZE_BYTES, 0);
+		if (bytes_received == 0 || bytes_received == -1) {
+			*term = 1;
+			goto exit;
+		}
+
+		// Write to file
+		if (fwrite(buf, bytes_received, 1, fp) != 1) {
+			goto exit;
+		}
+
+		next += bytes_received;
+		total_bytes_received += bytes_received;
 
 		break;
 	}
