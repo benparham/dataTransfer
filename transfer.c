@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <string.h>
+#include <assert.h>
 
 #include <transfer.h>
 
@@ -155,15 +156,7 @@ int tf_send_file(int socket_fd, FILE *fp, int offset, int size_bytes) {
 	return 0;	
 }
 
-
-int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
-
-	tf_header header;
-
-	// Wait for header
-	if (wait_for_header(socket_fd, &header, term)) {
-		goto exit;
-	}
+int recv_helper(int socket_fd, tf_header header, void **buf, size_t *size_bytes, int *term) {
 
 	// Allocate space for data
 	*buf = malloc(header.bytes);
@@ -203,19 +196,23 @@ exit:
 	return 1;
 }
 
-int tf_recv_file(int socket_fd, FILE *fp, int *term) {
-
-	assert(fp != NULL);
-
-	printf("Preparing to receive file\n");
+int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 
 	tf_header header;
 
 	// Wait for header
 	if (wait_for_header(socket_fd, &header, term)) {
-		goto exit;
+		return 1;
 	}
-	printf("Received header\n");
+
+	return recv_helper(socket_fd, header, buf, size_bytes, term);
+}
+
+static int recv_file_helper(int socket_fd, tf_header header, FILE *fp, int *term) {
+
+	printf("Writing to file...\n");
+
+	assert(fp != NULL);
 
 	// Wait for data
 	char buf[RECV_BUF_SIZE_BYTES];
@@ -225,25 +222,61 @@ int tf_recv_file(int socket_fd, FILE *fp, int *term) {
 
 		memset(buf, 0, RECV_BUF_SIZE_BYTES);
 
-		int bytes_received = recv(socket_fd, next, RECV_BUF_SIZE_BYTES, 0);
+		int bytes_received = recv(socket_fd, buf, RECV_BUF_SIZE_BYTES, 0);
 		if (bytes_received == 0 || bytes_received == -1) {
 			*term = 1;
 			goto exit;
 		}
+
+		printf("%s\n", buf);
 
 		// Write to file
 		if (fwrite(buf, bytes_received, 1, fp) != 1) {
 			goto exit;
 		}
 
-		next += bytes_received;
 		total_bytes_received += bytes_received;
 
 		break;
 	}
 
+	printf("...done\n");
+
 	return 0;
 
 exit:
 	return 1;
+}
+
+int tf_recv_file(int socket_fd, FILE *fp, int *term) {
+
+	printf("Preparing to receive file\n");
+
+	tf_header header;
+
+	// Wait for header
+	if (wait_for_header(socket_fd, &header, term)) {
+		return 1;
+	}
+	printf("Received header\n");
+
+	return recv_file_helper(socket_fd, header, fp, term);
+}
+
+int tf_recv_mixed(int socket_fd, int cutoff_bytes, void **buf, size_t *size_bytes, FILE *fp, int *term, int *is_file) {
+
+	tf_header header;
+
+	// Wait for header
+	if (wait_for_header(socket_fd, &header, term)) {
+		return 1;
+	}
+
+	if (header.bytes <= cutoff_bytes) {
+		*is_file = 0;
+		return recv_helper(socket_fd, header, buf, size_bytes, term);
+	} else {
+		*is_file = 1;
+		return recv_file_helper(socket_fd, header, fp, term);
+	}
 }
