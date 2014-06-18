@@ -211,6 +211,7 @@ int tf_recv(int socket_fd, void **buf, size_t *size_bytes, int *term) {
 static int recv_file_helper(int socket_fd, tf_header header, FILE *fp, int *term) {
 
 	printf("Writing to file...\n");
+	printf("Header gives size of %d\n", header.bytes);
 
 	assert(fp != NULL);
 
@@ -222,22 +223,25 @@ static int recv_file_helper(int socket_fd, tf_header header, FILE *fp, int *term
 
 		memset(buf, 0, RECV_BUF_SIZE_BYTES);
 
-		int bytes_received = recv(socket_fd, buf, RECV_BUF_SIZE_BYTES, 0);
+		int bytes_this_round = min(header.bytes - total_bytes_received, RECV_BUF_SIZE_BYTES);
+
+		int bytes_received = recv(socket_fd, buf, bytes_this_round, 0);
 		if (bytes_received == 0 || bytes_received == -1) {
 			*term = 1;
 			goto exit;
 		}
 
+		printf("\n===>Received %d bytes\n", bytes_received);
 		printf("%s\n", buf);
 
 		// Write to file
+		printf("writing out...");
 		if (fwrite(buf, bytes_received, 1, fp) != 1) {
 			goto exit;
 		}
+		printf("done\n");
 
 		total_bytes_received += bytes_received;
-
-		break;
 	}
 
 	printf("...done\n");
